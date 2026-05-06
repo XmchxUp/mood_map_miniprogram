@@ -1,0 +1,4 @@
+{
+  "desc": "Mood Map sitemap — no pages indexed (anonymous app, no search needed)",
+  "rules": [{ "action": "disallow", "page": "*" }]
+}

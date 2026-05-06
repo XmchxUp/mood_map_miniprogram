@@ -1,0 +1,16 @@
+/* Global reset */
+page {
+  font-family: -apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+}
+
+view, text, button {
+  box-sizing: border-box;
+}
+
+/* Prevent rubber-band scroll on iOS */
+page {
+  overflow: hidden;
+  height: 100vh;
+}

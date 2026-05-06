@@ -1,0 +1,338 @@
+<view class="container">
+
+  <!-- 离屏 Canvas：生成图钉图标，用户不可见 -->
+  <canvas type="2d" id="pin-canvas"
+    style="position:fixed;left:-200rpx;top:-200rpx;width:32px;height:42px;" />
+
+  <!-- 离屏 Canvas：生成分享卡片，用户不可见 -->
+  <canvas type="2d" id="share-canvas"
+    style="position:fixed;left:-9999rpx;top:-9999rpx;width:375px;height:560px;" />
+
+  <!-- ══════════════════════════════════════════════════════
+       地图
+  ══════════════════════════════════════════════════════ -->
+  <map
+    id="map"
+    class="map"
+    latitude="{{latitude}}"
+    longitude="{{longitude}}"
+    scale="{{scale}}"
+    circles="{{circles}}"
+    markers="{{markers}}"
+    show-location
+    enable-zoom
+    enable-scroll
+    enable-rotate="{{false}}"
+    enable-overlooking="{{false}}"
+    bindtap="onMapTap"
+    bindregionchange="onRegionChange"
+  />
+
+  <!-- ══════════════════════════════════════════════════════
+       地图控制按钮
+  ══════════════════════════════════════════════════════ -->
+  <view class="controls">
+    <view class="ctrl-btn" bind:tap="openStats">
+      <text class="ctrl-icon">📊</text>
+    </view>
+    <view class="ctrl-btn" bind:tap="openLeaderboard">
+      <text class="ctrl-icon">🏆</text>
+    </view>
+    <view class="ctrl-btn" bind:tap="locateUser">
+      <text class="ctrl-icon">⊙</text>
+    </view>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       全国统计滚动条
+  ══════════════════════════════════════════════════════ -->
+  <view class="ticker-bar" wx:if="{{tickerText}}">
+    <view class="ticker-track">
+      <text class="ticker-content">{{tickerText}}</text>
+    </view>
+  </view>
+  <!-- 加载占位 -->
+  <view class="ticker-bar ticker-bar--loading" wx:elif="{{!tickerText}}">
+    <text class="ticker-placeholder">🌏 正在加载全国心情数据…</text>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       图例
+  ══════════════════════════════════════════════════════ -->
+  <view class="legend">
+    <text class="legend-label">低落</text>
+    <view class="legend-bar" />
+    <text class="legend-label">愉悦</text>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       首次加载遮罩
+  ══════════════════════════════════════════════════════ -->
+  <view wx:if="{{loading}}" class="loading-overlay">
+    <view class="spinner" />
+    <text class="loading-text">正在定位…</text>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       通用半透明背景（关闭面板用）
+  ══════════════════════════════════════════════════════ -->
+  <view
+    class="backdrop {{(showSubmit || showStats || showLeaderboard) ? 'backdrop--on' : ''}}"
+    bind:tap="{{showSubmit ? 'closeSubmit' : showLeaderboard ? 'closeLeaderboard' : 'closeStats'}}"
+  />
+
+  <!-- ══════════════════════════════════════════════════════
+       提交心情面板
+  ══════════════════════════════════════════════════════ -->
+  <view class="sheet {{showSubmit ? 'sheet--open' : ''}}">
+    <view class="handle" />
+    <text class="sheet-title">你现在感觉怎么样？</text>
+    <text class="sheet-hint">选一个数字，然后提交</text>
+
+    <view class="mood-grid">
+      <block wx:for="{{moodOptions}}" wx:key="value">
+        <view
+          class="mood-cell {{selectedMood === item.value ? 'mood-cell--on' : ''}}"
+          style="--c: {{item.color}}"
+          data-value="{{item.value}}"
+          bind:tap="selectMood"
+        >
+          <text class="mood-num">{{item.value}}</text>
+          <text class="mood-emoji">{{item.emoji}}</text>
+        </view>
+      </block>
+    </view>
+
+    <view
+      class="mood-preview {{selectedMood ? 'mood-preview--on' : ''}}"
+      style="background: {{selectedMood ? moodOptions[selectedMood-1].color : 'transparent'}}"
+    >
+      <text class="mood-preview-text" wx:if="{{selectedMood}}">
+        心情 {{selectedMood}} — {{moodOptions[selectedMood - 1].emoji}}
+      </text>
+    </view>
+
+    <view class="sheet-actions">
+      <view class="btn-cancel" bind:tap="closeSubmit">取消</view>
+      <button
+        class="btn-submit {{selectedMood ? 'btn-submit--active' : ''}}"
+        disabled="{{!selectedMood || submitting}}"
+        loading="{{submitting}}"
+        bind:tap="submitMood"
+      >提交</button>
+    </view>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       提交反馈卡片（全屏）
+  ══════════════════════════════════════════════════════ -->
+  <view class="feedback-overlay {{showFeedback ? 'feedback-overlay--on' : ''}}">
+    <view class="feedback-glow" style="background: radial-gradient(ellipse at 50% 30%, {{feedback.color}}55 0%, transparent 70%)" />
+
+    <view class="feedback-card">
+      <!-- 关闭按钮 -->
+      <view class="feedback-close" bind:tap="closeFeedback">
+        <text class="feedback-close-icon">✕</text>
+      </view>
+
+      <!-- 大分值 -->
+      <text class="feedback-num" style="color: {{feedback.color}}">{{feedback.mood}}</text>
+
+      <!-- 进度条 -->
+      <view class="feedback-bar-track">
+        <view class="feedback-bar-fill"
+          style="width: {{feedback.mood * 10}}%; background: {{feedback.color}}" />
+      </view>
+
+      <!-- 心情标题 -->
+      <text class="feedback-title">{{feedback.title}}</text>
+
+      <!-- 分隔线 -->
+      <view class="feedback-divider" />
+
+      <!-- 统计行 -->
+      <view class="feedback-stats">
+        <view class="feedback-stat-row" wx:if="{{feedback.city && feedback.cityAvg !== null}}">
+          <text class="feedback-stat-icon">📍</text>
+          <text class="feedback-stat-text">
+            {{feedback.city}} 今日均值 {{feedback.cityAvg}}，
+            {{feedback.mood > feedback.cityAvg ? '你比城市更开心 😊' : feedback.mood < feedback.cityAvg ? '低于城市均值' : '和城市持平'}}
+          </text>
+        </view>
+        <view class="feedback-stat-row" wx:if="{{feedback.percentile !== null && feedback.percentile >= 40}}">
+          <text class="feedback-stat-icon">🏅</text>
+          <text class="feedback-stat-text">超过了周围 {{feedback.percentile}}% 的人</text>
+        </view>
+        <view class="feedback-stat-row" wx:if="{{feedback.streak >= 1}}">
+          <text class="feedback-stat-icon">🔥</text>
+          <text class="feedback-stat-text">{{feedback.milestoneMsg || '连续记录第 ' + feedback.streak + ' 天'}}</text>
+        </view>
+        <view class="feedback-stat-row" wx:if="{{feedback.totalCount > 0}}">
+          <text class="feedback-stat-icon">🌏</text>
+          <text class="feedback-stat-text">今天全国 {{feedback.totalCount}} 人在这里</text>
+        </view>
+      </view>
+
+      <!-- 按钮行 -->
+      <view class="feedback-actions">
+        <view class="feedback-btn-share {{feedback.sharing ? 'feedback-btn-share--loading' : ''}}"
+          bind:tap="shareFeedback">
+          <text>{{feedback.sharing ? '生成中…' : '保存分享卡 📸'}}</text>
+        </view>
+        <view class="feedback-btn-close" bind:tap="closeFeedback">
+          <text>关闭</text>
+        </view>
+      </view>
+
+      <!-- 隐私说明 -->
+      <text class="feedback-privacy">匿名 · 无需注册 · 位置已模糊到 ~1 公里</text>
+    </view>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       附近统计面板
+  ══════════════════════════════════════════════════════ -->
+  <view class="sheet stats-sheet {{showStats ? 'sheet--open' : ''}}">
+    <view class="handle" />
+
+    <view wx:if="{{statsLoading}}" class="stats-loading">
+      <view class="spinner spinner--dark" />
+      <text class="stats-loading-text">加载附近情绪中…</text>
+    </view>
+
+    <view wx:elif="{{stats.count === 0}}" class="stats-empty">
+      <text class="stats-empty-icon">🌐</text>
+      <text class="stats-empty-title">附近还没有心情记录</text>
+      <text class="stats-empty-hint">点击地图，成为第一个！</text>
+    </view>
+
+    <block wx:else>
+      <view class="stats-header">
+        <view class="stats-avg-wrap" style="border-color: {{stats.avgColor}}">
+          <text class="stats-avg-num" style="color: {{stats.avgColor}}">{{stats.avgMood}}</text>
+          <text class="stats-avg-label">平均心情</text>
+        </view>
+        <view class="stats-meta">
+          <text class="stats-count">{{stats.count}} 条记录</text>
+          <text class="stats-radius">5 公里范围内</text>
+        </view>
+      </view>
+
+      <view class="dist-section">
+        <text class="dist-title">分布</text>
+        <view class="dist-bars">
+          <view wx:for="{{stats.dist}}" wx:key="mood" class="dist-row">
+            <text class="dist-label">{{item.mood}}</text>
+            <view class="dist-bar-track">
+              <view class="dist-bar-fill"
+                style="width: {{item.pct}}%; background: {{item.color}}" />
+            </view>
+            <text class="dist-pct">{{item.pct}}%</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="entries-section" wx:if="{{stats.entries.length}}">
+        <text class="entries-title">最近</text>
+        <scroll-view scroll-y class="entries-scroll">
+          <view wx:for="{{stats.entries}}" wx:key="index" class="entry-row">
+            <view class="entry-dot" style="background: {{item.color}}" />
+            <text class="entry-emoji">{{item.emoji}}</text>
+            <text class="entry-mood">{{item.mood}}</text>
+            <text class="entry-dist">{{item.distKm}} 公里外</text>
+            <text class="entry-time">{{item.timeAgo}}</text>
+          </view>
+        </scroll-view>
+      </view>
+    </block>
+
+    <view class="stats-close-row">
+      <view class="btn-cancel btn-cancel--full" bind:tap="closeStats">关闭</view>
+    </view>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       城市排行榜面板
+  ══════════════════════════════════════════════════════ -->
+  <view class="sheet lb-sheet {{showLeaderboard ? 'sheet--open' : ''}}">
+    <view class="handle" />
+    <text class="sheet-title">城市心情排行</text>
+    <text class="sheet-hint">最近 200 条记录 · 至少 3 条才上榜</text>
+
+    <view wx:if="{{leaderboard.length === 0}}" class="stats-empty">
+      <text class="stats-empty-icon">📊</text>
+      <text class="stats-empty-title">暂无足够数据</text>
+      <text class="stats-empty-hint">多几个城市提交后就能看到排行了</text>
+    </view>
+
+    <scroll-view scroll-y class="lb-scroll" wx:else>
+      <view wx:for="{{leaderboard}}" wx:key="rank"
+        class="lb-row {{item.highlight ? 'lb-row--highlight' : ''}}">
+        <text class="lb-rank {{item.rank <= 3 ? 'lb-rank--top' : ''}}">
+          {{item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : item.rank}}
+        </text>
+        <text class="lb-city">{{item.city}}</text>
+        <view class="lb-bar-track">
+          <view class="lb-bar-fill" style="width: {{item.avg * 10}}%; background: {{item.color}}" />
+        </view>
+        <text class="lb-avg" style="color: {{item.color}}">{{item.avg}}</text>
+        <text class="lb-count">{{item.count}}条</text>
+      </view>
+    </scroll-view>
+
+    <view class="stats-close-row">
+      <view class="btn-cancel btn-cancel--full" bind:tap="closeLeaderboard">关闭</view>
+    </view>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       首次使用引导
+  ══════════════════════════════════════════════════════ -->
+  <view class="onboarding {{showOnboarding ? 'onboarding--on' : ''}}">
+    <view class="ob-card">
+      <text class="ob-logo">🌏</text>
+      <text class="ob-title">情绪地图</text>
+      <text class="ob-subtitle">实时看见周边的情绪</text>
+
+      <view class="ob-steps">
+        <view class="ob-step">
+          <text class="ob-step-icon">👆</text>
+          <view class="ob-step-text">
+            <text class="ob-step-title">点击地图任意位置</text>
+            <text class="ob-step-desc">选择你现在的心情（1–10）</text>
+          </view>
+        </view>
+        <view class="ob-step">
+          <text class="ob-step-icon">🎨</text>
+          <view class="ob-step-text">
+            <text class="ob-step-title">彩色圆圈 = 情绪热力</text>
+            <text class="ob-step-desc">红色低落，紫色愉悦，大小表示活跃度</text>
+          </view>
+        </view>
+        <view class="ob-step">
+          <text class="ob-step-icon">📊</text>
+          <view class="ob-step-text">
+            <text class="ob-step-title">点击右上角查看附近统计</text>
+            <text class="ob-step-desc">了解 5 公里内的情绪分布</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="ob-privacy">
+        <text class="ob-privacy-text">🔒 无需注册 · 完全匿名 · 位置精度约 1 公里</text>
+      </view>
+
+      <view class="ob-btn" bind:tap="dismissOnboarding">
+        <text class="ob-btn-text">开始探索</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- ══════════════════════════════════════════════════════
+       Toast 提示
+  ══════════════════════════════════════════════════════ -->
+  <view class="toast toast--{{toast.type}} {{toast.show ? 'toast--on' : ''}}">
+    <text class="toast-text">{{toast.msg}}</text>
+  </view>
+
+</view>

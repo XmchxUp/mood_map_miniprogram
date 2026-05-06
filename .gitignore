@@ -1,0 +1,23 @@
+# 微信开发者工具
+project.private.config.json
+.DS_Store
+Thumbs.db
+
+# Node 依赖
+node_modules/
+
+# 日志
+*.log
+npm-debug.log*
+
+# 本地 Go server 数据
+server/data/
+
+# 临时文件
+*.tmp
+*.temp
+.idea/
+.vscode/settings.json
+
+# 敏感配置（绝不提交真实 env ID 或 appid）
+# 说明：project.config.json 中的 appid 由 CI 注入，本地开发使用 project.private.config.json
